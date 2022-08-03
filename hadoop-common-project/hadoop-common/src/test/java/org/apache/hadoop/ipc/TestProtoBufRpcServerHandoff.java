@@ -37,6 +37,13 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hadoop.conf.ConfigurationGenerator;
+import org.junit.runner.RunWith;
+import edu.berkeley.cs.jqf.fuzz.Fuzz;
+import edu.berkeley.cs.jqf.fuzz.JQF;
+import com.pholser.junit.quickcheck.From;
+
+@RunWith(JQF.class)
 public class TestProtoBufRpcServerHandoff {
 
   public static final Logger LOG =
@@ -72,6 +79,57 @@ public class TestProtoBufRpcServerHandoff {
     CompletionService<ClientInvocationCallable> completionService =
         new ExecutorCompletionService<ClientInvocationCallable>(
             executorService);
+
+    completionService.submit(new ClientInvocationCallable(client, 5000l));
+    completionService.submit(new ClientInvocationCallable(client, 5000l));
+
+    long submitTime = System.currentTimeMillis();
+    Future<ClientInvocationCallable> future1 = completionService.take();
+    Future<ClientInvocationCallable> future2 = completionService.take();
+
+    ClientInvocationCallable callable1 = future1.get();
+    ClientInvocationCallable callable2 = future2.get();
+
+    LOG.info(callable1.toString());
+    LOG.info(callable2.toString());
+
+    // Ensure the 5 second sleep responses are within a reasonable time of each
+    // other.
+    Assert.assertTrue(Math.abs(callable1.endTime - callable2.endTime) < 2000l);
+    Assert.assertTrue(System.currentTimeMillis() - submitTime < 7000l);
+
+  }
+
+  @Fuzz
+  public void testFuzz(@From(ConfigurationGenerator.class) Configuration confFuzz) throws Exception {
+    Configuration conf = new Configuration(confFuzz);
+
+    TestProtoBufRpcServerHandoffServer serverImpl =
+            new TestProtoBufRpcServerHandoffServer();
+    BlockingService blockingService =
+            TestProtobufRpcHandoffProto.newReflectiveBlockingService(serverImpl);
+
+    RPC.setProtocolEngine(conf, TestProtoBufRpcServerHandoffProtocol.class,
+            ProtobufRpcEngine2.class);
+    RPC.Server server = new RPC.Builder(conf)
+            .setProtocol(TestProtoBufRpcServerHandoffProtocol.class)
+            .setInstance(blockingService)
+            .setVerbose(true)
+            .setNumHandlers(1) // Num Handlers explicitly set to 1 for test.
+            .build();
+    server.start();
+
+    InetSocketAddress address = server.getListenerAddress();
+    long serverStartTime = System.currentTimeMillis();
+    LOG.info("Server started at: " + address + " at time: " + serverStartTime);
+
+    final TestProtoBufRpcServerHandoffProtocol client = RPC.getProxy(
+            TestProtoBufRpcServerHandoffProtocol.class, 1, address, conf);
+
+    ExecutorService executorService = Executors.newFixedThreadPool(2);
+    CompletionService<ClientInvocationCallable> completionService =
+            new ExecutorCompletionService<ClientInvocationCallable>(
+                    executorService);
 
     completionService.submit(new ClientInvocationCallable(client, 5000l));
     completionService.submit(new ClientInvocationCallable(client, 5000l));

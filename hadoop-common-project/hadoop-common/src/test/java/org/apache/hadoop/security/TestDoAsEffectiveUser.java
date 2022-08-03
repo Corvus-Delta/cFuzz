@@ -42,9 +42,16 @@ import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Enumeration;
 
+import org.apache.hadoop.conf.ConfigurationGenerator;
+import org.junit.runner.RunWith;
+import edu.berkeley.cs.jqf.fuzz.Fuzz;
+import edu.berkeley.cs.jqf.fuzz.JQF;
+import com.pholser.junit.quickcheck.From;
+
 /**
  * Test do as effective user.
  */
+@RunWith(JQF.class)
 public class TestDoAsEffectiveUser extends TestRpcBase {
   final private static String REAL_USER_NAME = "realUser1@HADOOP.APACHE.ORG";
   final private static String REAL_USER_SHORT_NAME = "realUser1";
@@ -173,6 +180,36 @@ public class TestDoAsEffectiveUser extends TestRpcBase {
     }
   }
 
+  @Fuzz
+  public void testRealUserSetupFuzz(@From(ConfigurationGenerator.class) Configuration confFuzz) throws IOException {
+    final Configuration conf = new Configuration(confFuzz);
+    conf.setStrings(DefaultImpersonationProvider.getTestProvider().
+            getProxySuperuserGroupConfKey(REAL_USER_SHORT_NAME), "group1");
+    configureSuperUserIPAddresses(conf, REAL_USER_SHORT_NAME);
+    // Set RPC engine to protobuf RPC engine
+    RPC.setProtocolEngine(conf, TestRpcService.class,
+            ProtobufRpcEngine2.class);
+    UserGroupInformation.setConfiguration(conf);
+    final Server server = setupTestServer(conf, 5);
+
+    refreshConf(conf);
+    try {
+      UserGroupInformation realUserUgi = UserGroupInformation
+              .createRemoteUser(REAL_USER_NAME);
+      checkRemoteUgi(realUserUgi, conf);
+
+      UserGroupInformation proxyUserUgi =
+              UserGroupInformation.createProxyUserForTesting(
+                      PROXY_USER_NAME, realUserUgi, GROUP_NAMES);
+      checkRemoteUgi(proxyUserUgi, conf);
+    } catch (Exception e) {
+      e.printStackTrace();
+      Assert.fail();
+    } finally {
+      stop(server, client);
+    }
+  }
+
   @Test(timeout=4000)
   public void testRealUserAuthorizationSuccess() throws IOException {
     final Configuration conf = new Configuration();
@@ -244,6 +281,46 @@ public class TestDoAsEffectiveUser extends TestRpcBase {
       stop(server, client);
     }
   }
+
+  @Fuzz
+  public void testRealUserIPAuthorizationFailureFuzz(@From(ConfigurationGenerator.class) Configuration confFuzz) throws IOException {
+    final Configuration conf = new Configuration(confFuzz);
+    conf.setStrings(DefaultImpersonationProvider.getTestProvider().
+                    getProxySuperuserIpConfKey(REAL_USER_SHORT_NAME),
+            "20.20.20.20"); //Authorized IP address
+    conf.setStrings(DefaultImpersonationProvider.getTestProvider().
+                    getProxySuperuserGroupConfKey(REAL_USER_SHORT_NAME),
+            "group1");
+    RPC.setProtocolEngine(conf, TestRpcService.class,
+            ProtobufRpcEngine2.class);
+    UserGroupInformation.setConfiguration(conf);
+    final Server server = setupTestServer(conf, 5);
+
+    refreshConf(conf);
+
+    try {
+      UserGroupInformation realUserUgi = UserGroupInformation
+              .createRemoteUser(REAL_USER_NAME);
+
+      UserGroupInformation proxyUserUgi = UserGroupInformation
+              .createProxyUserForTesting(PROXY_USER_NAME, realUserUgi, GROUP_NAMES);
+      String retVal = proxyUserUgi
+              .doAs(new PrivilegedExceptionAction<String>() {
+                @Override
+                public String run() throws ServiceException {
+                  client = getClient(addr, conf);
+                  return client.getCurrentUser(null,
+                          newEmptyRequest()).getUser();
+                }
+              });
+
+      Assert.fail("The RPC must have failed " + retVal);
+    } catch (Exception e) {
+      e.printStackTrace();
+    } finally {
+      stop(server, client);
+    }
+  }
   
   @Test
   public void testRealUserIPNotSpecified() throws IOException {
@@ -272,6 +349,42 @@ public class TestDoAsEffectiveUser extends TestRpcBase {
                   newEmptyRequest()).getUser();
             }
           });
+
+      Assert.fail("The RPC must have failed " + retVal);
+    } catch (Exception e) {
+      e.printStackTrace();
+    } finally {
+      stop(server, client);
+    }
+  }
+
+  @Fuzz
+  public void testRealUserIPNotSpecifiedFuzz(@From(ConfigurationGenerator.class) Configuration confFuzz) throws IOException {
+    final Configuration conf = new Configuration(confFuzz);
+    conf.setStrings(DefaultImpersonationProvider.getTestProvider().
+            getProxySuperuserGroupConfKey(REAL_USER_SHORT_NAME), "group1");
+    RPC.setProtocolEngine(conf, TestRpcService.class,
+            ProtobufRpcEngine2.class);
+    UserGroupInformation.setConfiguration(conf);
+    final Server server = setupTestServer(conf, 2);
+
+    refreshConf(conf);
+
+    try {
+      UserGroupInformation realUserUgi = UserGroupInformation
+              .createRemoteUser(REAL_USER_NAME);
+
+      UserGroupInformation proxyUserUgi = UserGroupInformation
+              .createProxyUserForTesting(PROXY_USER_NAME, realUserUgi, GROUP_NAMES);
+      String retVal = proxyUserUgi
+              .doAs(new PrivilegedExceptionAction<String>() {
+                @Override
+                public String run() throws ServiceException {
+                  client = getClient(addr, conf);
+                  return client.getCurrentUser(null,
+                          newEmptyRequest()).getUser();
+                }
+              });
 
       Assert.fail("The RPC must have failed " + retVal);
     } catch (Exception e) {
@@ -313,6 +426,39 @@ public class TestDoAsEffectiveUser extends TestRpcBase {
       stop(server, client);
     }
   }
+
+  @Fuzz
+  public void testRealUserGroupNotSpecifiedFuzz(@From(ConfigurationGenerator.class) Configuration confFuzz) throws IOException {
+    final Configuration conf = new Configuration(confFuzz);
+    configureSuperUserIPAddresses(conf, REAL_USER_SHORT_NAME);
+    RPC.setProtocolEngine(conf, TestRpcService.class,
+            ProtobufRpcEngine2.class);
+    UserGroupInformation.setConfiguration(conf);
+    final Server server = setupTestServer(conf, 2);
+
+    try {
+      UserGroupInformation realUserUgi = UserGroupInformation
+              .createRemoteUser(REAL_USER_NAME);
+
+      UserGroupInformation proxyUserUgi = UserGroupInformation
+              .createProxyUserForTesting(PROXY_USER_NAME, realUserUgi, GROUP_NAMES);
+      String retVal = proxyUserUgi
+              .doAs(new PrivilegedExceptionAction<String>() {
+                @Override
+                public String run() throws ServiceException {
+                  client = getClient(addr, conf);
+                  return client.getCurrentUser(null,
+                          newEmptyRequest()).getUser();
+                }
+              });
+
+      Assert.fail("The RPC must have failed " + retVal);
+    } catch (Exception e) {
+      e.printStackTrace();
+    } finally {
+      stop(server, client);
+    }
+  }
   
   @Test
   public void testRealUserGroupAuthorizationFailure() throws IOException {
@@ -343,6 +489,44 @@ public class TestDoAsEffectiveUser extends TestRpcBase {
                   newEmptyRequest()).getUser();
             }
           });
+
+      Assert.fail("The RPC must have failed " + retVal);
+    } catch (Exception e) {
+      e.printStackTrace();
+    } finally {
+      stop(server, client);
+    }
+  }
+
+  @Fuzz
+  public void testRealUserGroupAuthorizationFailureFuzz(@From(ConfigurationGenerator.class) Configuration confFuzz) throws IOException {
+    final Configuration conf = new Configuration(confFuzz);
+    configureSuperUserIPAddresses(conf, REAL_USER_SHORT_NAME);
+    conf.setStrings(DefaultImpersonationProvider.getTestProvider().
+                    getProxySuperuserGroupConfKey(REAL_USER_SHORT_NAME),
+            "group3");
+    RPC.setProtocolEngine(conf, TestRpcService.class,
+            ProtobufRpcEngine2.class);
+    UserGroupInformation.setConfiguration(conf);
+    final Server server = setupTestServer(conf, 2);
+
+    refreshConf(conf);
+
+    try {
+      UserGroupInformation realUserUgi = UserGroupInformation
+              .createRemoteUser(REAL_USER_NAME);
+
+      UserGroupInformation proxyUserUgi = UserGroupInformation
+              .createProxyUserForTesting(PROXY_USER_NAME, realUserUgi, GROUP_NAMES);
+      String retVal = proxyUserUgi
+              .doAs(new PrivilegedExceptionAction<String>() {
+                @Override
+                public String run() throws ServiceException {
+                  client = getClient(addr, conf);
+                  return client.getCurrentUser(null,
+                          newEmptyRequest()).getUser();
+                }
+              });
 
       Assert.fail("The RPC must have failed " + retVal);
     } catch (Exception e) {

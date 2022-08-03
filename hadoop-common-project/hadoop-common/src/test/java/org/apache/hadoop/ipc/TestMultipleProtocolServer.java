@@ -22,6 +22,13 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.hadoop.conf.ConfigurationGenerator;
+import org.junit.runner.RunWith;
+import edu.berkeley.cs.jqf.fuzz.Fuzz;
+import edu.berkeley.cs.jqf.fuzz.JQF;
+import com.pholser.junit.quickcheck.From;
+
+@RunWith(JQF.class)
 public class TestMultipleProtocolServer extends TestRpcBase {
 
   private static RPC.Server server;
@@ -46,6 +53,19 @@ public class TestMultipleProtocolServer extends TestRpcBase {
     Configuration conf2 = new Configuration();
     RPC.setProtocolEngine(conf2, TestRpcService.class,
         ProtobufRpcEngine2.class);
+    TestRpcService client = RPC.getProxy(TestRpcService.class, 0, addr, conf2);
+    TestProtoBufRpc.testProtoBufRpc(client);
+  }
+
+  @Fuzz
+  public void testPBServiceFuzz(@From(ConfigurationGenerator.class) Configuration confFuzz) throws Exception {
+    super.setupConfFuzz(confFuzz);
+    server = setupTestServer(conf, 2);
+
+    // Set RPC engine to protobuf RPC engine
+    Configuration conf2 = new Configuration();
+    RPC.setProtocolEngine(conf2, TestRpcService.class,
+            ProtobufRpcEngine2.class);
     TestRpcService client = RPC.getProxy(TestRpcService.class, 0, addr, conf2);
     TestProtoBufRpc.testProtoBufRpc(client);
   }

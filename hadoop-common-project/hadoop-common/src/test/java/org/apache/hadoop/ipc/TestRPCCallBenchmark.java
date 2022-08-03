@@ -19,10 +19,17 @@ package org.apache.hadoop.ipc;
 
 import static org.junit.Assert.*;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.util.ToolRunner;
 import org.junit.Test;
 
+import org.apache.hadoop.conf.ConfigurationGenerator;
+import org.junit.runner.RunWith;
+import edu.berkeley.cs.jqf.fuzz.Fuzz;
+import edu.berkeley.cs.jqf.fuzz.JQF;
+import com.pholser.junit.quickcheck.From;
 
+@RunWith(JQF.class)
 public class TestRPCCallBenchmark {
 
   @Test(timeout=20000)
@@ -35,6 +42,19 @@ public class TestRPCCallBenchmark {
       "--serverReaderThreads", "4",
       "--messageSize", "1024",
       "--engine", "protobuf"});
+    assertEquals(0, rc);
+  }
+
+  @Fuzz
+  public void testBenchmarkWithProtoFuzz(@From(ConfigurationGenerator.class) Configuration confFuzz) throws Exception {
+    int rc = ToolRunner.run(new RPCCallBenchmark(confFuzz),
+            new String[] {
+                    "--clientThreads", "30",
+                    "--serverThreads", "30",
+                    "--time", "5",
+                    "--serverReaderThreads", "4",
+                    "--messageSize", "1024",
+                    "--engine", "protobuf"});
     assertEquals(0, rc);
   }
 }

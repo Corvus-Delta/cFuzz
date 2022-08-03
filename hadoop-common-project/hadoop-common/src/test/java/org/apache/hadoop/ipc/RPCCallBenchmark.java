@@ -51,6 +51,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * Run with --help option for usage.
  */
 public class RPCCallBenchmark extends TestRpcBase implements Tool {
+  RPCCallBenchmark() {
+    super();
+  }
+  RPCCallBenchmark(Configuration confFuzz) {
+    this.conf = confFuzz;
+  }
   private Configuration conf;
   private AtomicLong callCount = new AtomicLong(0);
   private static ThreadMXBean threadBean =

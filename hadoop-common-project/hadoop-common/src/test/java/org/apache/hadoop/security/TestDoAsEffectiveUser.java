@@ -82,6 +82,15 @@ public class TestDoAsEffectiveUser extends TestRpcBase {
     refreshConf(masterConf);
   }
 
+  public void setConfFuzz(Configuration confFuzz) throws IOException {
+      confFuzz.set(CommonConfigurationKeysPublic.HADOOP_SECURITY_AUTH_TO_LOCAL,
+              "RULE:[2:$1@$0](.*@HADOOP.APACHE.ORG)s/@.*//" +
+              "RULE:[1:$1@$0](.*@HADOOP.APACHE.ORG)s/@.*//"
+              + "DEFAULT");
+    UserGroupInformation.setConfiguration(confFuzz);
+    refreshConf(confFuzz);
+  }
+
   private void configureSuperUserIPAddresses(Configuration conf,
       String superUserShortName) throws IOException {
     ArrayList<String> ipList = new ArrayList<>();
@@ -584,6 +593,50 @@ public class TestDoAsEffectiveUser extends TestRpcBase {
     Assert.assertEquals(REAL_USER_NAME + " (auth:TOKEN) via SomeSuperUser (auth:SIMPLE)", retVal);
   }
 
+  @Fuzz
+  public void testProxyWithTokenFuzz(@From(ConfigurationGenerator.class) Configuration confFuzz) throws Exception {
+    setConfFuzz(confFuzz);
+    final Configuration conf = new Configuration(confFuzz);
+    TestTokenSecretManager sm = new TestTokenSecretManager();
+    SecurityUtil.setAuthenticationMethod(AuthenticationMethod.KERBEROS, conf);
+    RPC.setProtocolEngine(conf, TestRpcService.class,
+            ProtobufRpcEngine2.class);
+    UserGroupInformation.setConfiguration(conf);
+    final Server server = setupTestServer(conf, 5, sm);
+
+    final UserGroupInformation current = UserGroupInformation
+            .createRemoteUser(REAL_USER_NAME);
+
+    TestTokenIdentifier tokenId = new TestTokenIdentifier(new Text(current
+            .getUserName()), new Text("SomeSuperUser"));
+    Token<TestTokenIdentifier> token = new Token<>(tokenId,
+            sm);
+    SecurityUtil.setTokenService(token, addr);
+    UserGroupInformation proxyUserUgi = UserGroupInformation
+            .createProxyUserForTesting(PROXY_USER_NAME, current, GROUP_NAMES);
+    proxyUserUgi.addToken(token);
+
+    refreshConf(conf);
+
+    String retVal = proxyUserUgi.doAs(new PrivilegedExceptionAction<String>() {
+      @Override
+      public String run() throws Exception {
+        try {
+          client = getClient(addr, conf);
+          return client.getCurrentUser(null,
+                  newEmptyRequest()).getUser();
+        } catch (Exception e) {
+          e.printStackTrace();
+          throw e;
+        } finally {
+          stop(server, client);
+        }
+      }
+    });
+    //The user returned by server must be the one in the token.
+    Assert.assertEquals(REAL_USER_NAME + " (auth:TOKEN) via SomeSuperUser (auth:SIMPLE)", retVal);
+  }
+
   /*
    * The user gets the token via a superuser. Server should authenticate
    * this user. 
@@ -616,6 +669,47 @@ public class TestDoAsEffectiveUser extends TestRpcBase {
           client = getClient(addr, newConf);
           return client.getCurrentUser(null,
               newEmptyRequest()).getUser();
+        } catch (Exception e) {
+          e.printStackTrace();
+          throw e;
+        } finally {
+          stop(server, client);
+        }
+      }
+    });
+    String expected = REAL_USER_NAME + " (auth:TOKEN) via SomeSuperUser (auth:SIMPLE)";
+    Assert.assertEquals(retVal + "!=" + expected, expected, retVal);
+  }
+
+  @Fuzz
+  public void testTokenBySuperUser(@From(ConfigurationGenerator.class) Configuration confFuzz) throws Exception {
+    setConfFuzz(confFuzz);
+    TestTokenSecretManager sm = new TestTokenSecretManager();
+    final Configuration newConf = new Configuration(confFuzz);
+    SecurityUtil.setAuthenticationMethod(AuthenticationMethod.KERBEROS, newConf);
+    // Set RPC engine to protobuf RPC engine
+    RPC.setProtocolEngine(newConf, TestRpcService.class,
+            ProtobufRpcEngine2.class);
+    UserGroupInformation.setConfiguration(newConf);
+    final Server server = setupTestServer(newConf, 5, sm);
+
+    final UserGroupInformation current = UserGroupInformation
+            .createUserForTesting(REAL_USER_NAME, GROUP_NAMES);
+
+    refreshConf(newConf);
+
+    TestTokenIdentifier tokenId = new TestTokenIdentifier(new Text(current
+            .getUserName()), new Text("SomeSuperUser"));
+    Token<TestTokenIdentifier> token = new Token<>(tokenId, sm);
+    SecurityUtil.setTokenService(token, addr);
+    current.addToken(token);
+    String retVal = current.doAs(new PrivilegedExceptionAction<String>() {
+      @Override
+      public String run() throws Exception {
+        try {
+          client = getClient(addr, newConf);
+          return client.getCurrentUser(null,
+                  newEmptyRequest()).getUser();
         } catch (Exception e) {
           e.printStackTrace();
           throw e;
